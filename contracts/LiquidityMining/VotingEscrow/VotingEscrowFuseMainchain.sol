@@ -11,9 +11,9 @@ import "../../core/libraries/MiniHelpers.sol";
 import "../../core/libraries/Errors.sol";
 
 import "./VotingEscrowTokenBase.sol";
-import "../CrossChainMsg/PendleMsgSenderAppUpg.sol";
+import "../CrossChainMsg/FuseMsgSenderAppUpg.sol";
 
-contract VotingEscrowPendleMainchain is VotingEscrowTokenBase, IPVotingEscrowMainchain, PendleMsgSenderAppUpg {
+contract VotingEscrowFuseMainchain is VotingEscrowTokenBase, IPVotingEscrowMainchain, FuseMsgSenderAppUpg {
     using SafeERC20 for IERC20;
     using VeBalanceLib for VeBalance;
     using VeBalanceLib for LockedPosition;
@@ -25,7 +25,7 @@ contract VotingEscrowPendleMainchain is VotingEscrowTokenBase, IPVotingEscrowMai
     bytes private constant SAMPLE_POSITION_UPDATE_MESSAGE =
         abi.encode(0, VeBalance(0, 0), abi.encode(address(0), LockedPosition(0, 0)));
 
-    IERC20 public immutable pendle;
+    IERC20 public immutable fuse;
 
     uint128 public lastSlopeChangeAppliedAt;
 
@@ -37,15 +37,15 @@ contract VotingEscrowPendleMainchain is VotingEscrowTokenBase, IPVotingEscrowMai
     mapping(uint128 => uint128) public totalSupplyAt;
 
     // Saving VeBalance checkpoint for users of each week, can later use binary search
-    // to ask for their vePendle balance at any wTime
+    // to ask for their veFuse balance at any wTime
     mapping(address => Checkpoints.History) internal userHistory;
 
     constructor(
-        IERC20 _pendle,
-        address _pendleMsgSendEndpoint,
+        IERC20 _fuse,
+        address _fuseMsgSendEndpoint,
         uint256 initialApproxDestinationGas
-    ) initializer PendleMsgSenderAppUpg(_pendleMsgSendEndpoint, initialApproxDestinationGas) {
-        pendle = _pendle;
+    ) initializer FuseMsgSenderAppUpg(_fuseMsgSendEndpoint, initialApproxDestinationGas) {
+        fuse = _fuse;
         lastSlopeChangeAppliedAt = WeekMath.getCurrentWeekStart();
         __BoringOwnable_init();
     }
@@ -63,7 +63,7 @@ contract VotingEscrowPendleMainchain is VotingEscrowTokenBase, IPVotingEscrowMai
     /**
      * @notice increases the lock position of a user (amount and/or expiry). Applicable even when
      * user has no position or the current position has expired.
-     * @param additionalAmountToLock pendle amount to be pulled in from user to lock.
+     * @param additionalAmountToLock fuse amount to be pulled in from user to lock.
      * @param newExpiry new lock expiry. Must be a valid week beginning, and resulting lock
      * duration (since `block.timestamp`) must be within the allowed range.
      * @dev Will revert if resulting position has zero lock amount.
@@ -90,7 +90,7 @@ contract VotingEscrowPendleMainchain is VotingEscrowTokenBase, IPVotingEscrowMai
         uint128 additionalDurationToLock = newExpiry - positionData[user].expiry;
 
         if (additionalAmountToLock > 0) {
-            pendle.safeTransferFrom(user, address(this), additionalAmountToLock);
+            fuse.safeTransferFrom(user, address(this), additionalAmountToLock);
         }
 
         newVeBalance = _increasePosition(user, additionalAmountToLock, additionalDurationToLock);
@@ -99,8 +99,8 @@ contract VotingEscrowPendleMainchain is VotingEscrowTokenBase, IPVotingEscrowMai
     }
 
     /**
-     * @notice Withdraws an expired lock position, returns locked PENDLE back to user
-     * @dev reverts if position is not expired, or if no locked PENDLE to withdraw
+     * @notice Withdraws an expired lock position, returns locked FUSE back to user
+     * @dev reverts if position is not expired, or if no locked FUSE to withdraw
      * @dev broadcast is not bundled since it can be done anytime after
      */
     function withdraw() external returns (uint128 amount) {
@@ -113,7 +113,7 @@ contract VotingEscrowPendleMainchain is VotingEscrowTokenBase, IPVotingEscrowMai
 
         delete positionData[user];
 
-        pendle.safeTransfer(user, amount);
+        fuse.safeTransfer(user, amount);
 
         emit Withdraw(user, amount);
     }
