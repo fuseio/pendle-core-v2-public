@@ -50,16 +50,6 @@ contract VotingEscrowFuseMainchain is VotingEscrowTokenBase, IPVotingEscrowMainc
         __BoringOwnable_init();
     }
 
-    /// @notice basically a proxy function to call increaseLockPosition & broadcastUserPosition at the same time
-    function increaseLockPositionAndBroadcast(
-        uint128 additionalAmountToLock,
-        uint128 newExpiry,
-        uint256[] calldata chainIds
-    ) external payable refundUnusedEth returns (uint128 newVeBalance) {
-        newVeBalance = increaseLockPosition(additionalAmountToLock, newExpiry);
-        broadcastUserPosition(msg.sender, chainIds);
-    }
-
     /**
      * @notice increases the lock position of a user (amount and/or expiry). Applicable even when
      * user has no position or the current position has expired.
@@ -73,9 +63,10 @@ contract VotingEscrowFuseMainchain is VotingEscrowTokenBase, IPVotingEscrowMainc
     function increaseLockPosition(
         uint128 additionalAmountToLock,
         uint128 newExpiry
-    ) public returns (uint128 newVeBalance) {
+    ) public payable returns (uint128 newVeBalance) {
         address user = msg.sender;
 
+        if (msg.value < additionalAmountToLock) revert Errors.VEInsufficientFunds();
         if (!WeekMath.isValidWTime(newExpiry)) revert Errors.InvalidWTime(newExpiry);
         if (MiniHelpers.isTimeInThePast(newExpiry)) revert Errors.ExpiryInThePast(newExpiry);
 
@@ -88,10 +79,6 @@ contract VotingEscrowFuseMainchain is VotingEscrowTokenBase, IPVotingEscrowMainc
         if (newTotalAmountLocked == 0) revert Errors.VEZeroAmountLocked();
 
         uint128 additionalDurationToLock = newExpiry - positionData[user].expiry;
-
-        if (additionalAmountToLock > 0) {
-            fuse.safeTransferFrom(user, address(this), additionalAmountToLock);
-        }
 
         newVeBalance = _increasePosition(user, additionalAmountToLock, additionalDurationToLock);
 
@@ -113,7 +100,8 @@ contract VotingEscrowFuseMainchain is VotingEscrowTokenBase, IPVotingEscrowMainc
 
         delete positionData[user];
 
-        fuse.safeTransfer(user, amount);
+        (bool success, ) = user.call{value: amount}("");
+        require(success, "Transfer failed");
 
         emit Withdraw(user, amount);
     }
@@ -127,38 +115,12 @@ contract VotingEscrowFuseMainchain is VotingEscrowTokenBase, IPVotingEscrowMainc
         return supply.getCurrentValue();
     }
 
-    /// @notice updates and broadcast the current totalSupply to different chains
-    function broadcastTotalSupply(uint256[] calldata chainIds) public payable refundUnusedEth {
-        _broadcastPosition(address(0), chainIds);
-    }
-
-    /**
-     * @notice updates and broadcast the position of `user` to different chains, also updates and
-     * broadcasts totalSupply
-     */
-    function broadcastUserPosition(address user, uint256[] calldata chainIds) public payable refundUnusedEth {
-        if (user == address(0)) revert Errors.ZeroAddress();
-        _broadcastPosition(user, chainIds);
-    }
-
     function getUserHistoryLength(address user) external view returns (uint256) {
         return userHistory[user].length();
     }
 
     function getUserHistoryAt(address user, uint256 index) external view returns (Checkpoint memory) {
         return userHistory[user].get(index);
-    }
-
-    function getBroadcastSupplyFee(uint256[] calldata chainIds) external view returns (uint256 fee) {
-        for (uint256 i = 0; i < chainIds.length; i++) {
-            fee += _getSendMessageFee(chainIds[i], SAMPLE_SUPPLY_UPDATE_MESSAGE);
-        }
-    }
-
-    function getBroadcastPositionFee(uint256[] calldata chainIds) external view returns (uint256 fee) {
-        for (uint256 i = 0; i < chainIds.length; i++) {
-            fee += _getSendMessageFee(chainIds[i], SAMPLE_POSITION_UPDATE_MESSAGE);
-        }
     }
 
     /**
@@ -221,28 +183,5 @@ contract VotingEscrowFuseMainchain is VotingEscrowTokenBase, IPVotingEscrowMainc
         lastSlopeChangeAppliedAt = wTime;
 
         return (supply, wTime);
-    }
-
-    /// @notice broadcast position to all chains in chainIds
-    function _broadcastPosition(address user, uint256[] calldata chainIds) internal {
-        if (chainIds.length == 0) revert Errors.ArrayEmpty();
-
-        (VeBalance memory supply, ) = _applySlopeChange();
-
-        bytes memory userData = (user == address(0) ? EMPTY_BYTES : abi.encode(user, positionData[user]));
-
-        for (uint256 i = 0; i < chainIds.length; ++i) {
-            if (!destinationContracts.contains(chainIds[i])) revert Errors.ChainNotSupported(chainIds[i]);
-            _broadcast(chainIds[i], uint128(block.timestamp), supply, userData);
-        }
-
-        if (user != address(0)) {
-            emit BroadcastUserPosition(user, chainIds);
-        }
-        emit BroadcastTotalSupply(supply, chainIds);
-    }
-
-    function _broadcast(uint256 chainId, uint128 msgTime, VeBalance memory supply, bytes memory userData) internal {
-        _sendMessage(chainId, abi.encode(msgTime, supply, userData));
     }
 }

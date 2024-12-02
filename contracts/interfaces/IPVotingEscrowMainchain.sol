@@ -17,7 +17,7 @@ interface IPVotingEscrowMainchain is IPVeToken {
 
     // ============= ACTIONS =============
 
-    function increaseLockPosition(uint128 additionalAmountToLock, uint128 expiry) external returns (uint128);
+    function increaseLockPosition(uint128 additionalAmountToLock, uint128 expiry) external payable returns (uint128);
 
     function withdraw() external returns (uint128);
 
